@@ -1,5 +1,6 @@
 # Data files (large/raw data)
 data/
+!data/README.md
 
 # macOS
 .DS_Store

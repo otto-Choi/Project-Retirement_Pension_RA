@@ -20,54 +20,18 @@
 
 ## 프로젝트 구조
 
-```
-퇴직연금 _XAI/
-├── README.md                          ← 이 파일 (프로젝트 전체 아카이브)
-├── CLAUDE.md                          ← Claude Code 작업 지침
-│
-├── src/                               ← 실행 스크립트 (Python)
-│   ├── step3_collect_data.py          ← Step 3: 기초자산 지수 데이터 수집
-│   ├── step3_window_analysis.py       ← Step 3: 최적 롤링 윈도우 탐색
-│   ├── step4_portfolio.py             ← Step 4: BL 내재수익률 + Sortino-max 포트폴리오
-│   ├── step5_constrained.py           ← Step 5: 지역 제약 포트폴리오 (확정 버전)
-│   └── portfolio_engine.py            ← 통합 엔진: Risk Score → 포트폴리오 + XAI
-│
-├── data/                              ← 모든 입력 데이터 (통합)
-│   ├── index_returns.parquet          ← 기초자산 지수 일별 수익률 (추정용)
-│   ├── slot_returns.parquet           ← ETF 슬롯별 일별 수익률 (OOS 평가용)
-│   ├── mar_series.parquet             ← 시변 MAR (ECOS 정기예금 금리)
-│   ├── year_end_best.csv              ← 연도별×슬롯별 선정 ETF + AUM
-│   ├── year_end_universe.csv          ← 연도별 투자 가능 ETF 유니버스
-│   ├── filtered_universe.csv          ← 레버리지·인버스 제거 후 최종 ETF 목록
-│   ├── etf_listed.csv                 ← KRX 현재 상장 ETF 기본정보
-│   ├── etf_delisted.csv               ← KIND 상장폐지 ETF 목록
-│   ├── etf_analysis_list.csv          ← 슬롯 매핑·분석 대상 ETF 목록
-│   ├── etf_prices.csv                 ← ETF 가격 시계열
-│   ├── macro_monthly.csv              ← ECOS 거시지표 (월별)
-│   ├── macro_annual.csv               ← ECOS 거시지표 (연간)
-│   └── macro_daily.csv                ← 거시지표 일별 변환값
-│
-├── results/                           ← 파이프라인 출력 결과
-│   ├── step3/
-│   │   └── window_analysis_result.csv ← 윈도우별 4기준 성과 비교 → 5년 확정
-│   ├── step4/
-│   │   ├── portfolio_weights.parquet  ← 비제약 Sortino-max 분기별 비중
-│   │   ├── portfolio_performance.parquet
-│   │   ├── summary.csv
-│   │   └── weights_pivot.csv
-│   └── step5/
-│       ├── portfolio_weights_constrained.parquet  ← 지역제약 포트폴리오 비중 (확정)
-│       ├── portfolio_weights_mvp.parquet           ← MVP 포트폴리오 비중
-│       ├── portfolio_performance_constrained.parquet
-│       ├── portfolio_performance_mvp.parquet
-│       ├── pi_history.parquet         ← 분기별 BL 내재수익률 Π 이력
-│       ├── sigma_down_history.parquet ← 분기별 하방공분산 이력
-│       ├── binding_history.parquet    ← 제약 활성화 이력 (XAI B3 소스)
-│       ├── comparison.csv             ← 비제약 vs 지역제약 성과 비교
-│       └── weights_constrained.csv    ← 최신 비중 (CSV, 가독용)
-│
-└── docs/                              ← 프로젝트 문서 (아래 목록 참조)
-```
+상세 파일 트리는 [STRUCTURE.md](STRUCTURE.md) 참조.
+
+주요 디렉토리:
+
+| 디렉토리 | 역할 |
+|---------|------|
+| `src/` | 실행 스크립트 (Step 3~8, portfolio_engine) |
+| `notebooks/` | 분석·검증 노트북 |
+| `data/` | 모든 입력 데이터 |
+| `results/` | 파이프라인 출력 결과 (step3~8, current) |
+| `docs/` | 프로젝트 문서 (01~13) |
+| `documents/` | 팀 공유 문서 |
 
 ---
 

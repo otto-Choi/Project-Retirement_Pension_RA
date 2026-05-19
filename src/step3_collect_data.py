@@ -22,6 +22,7 @@
   MAR                  → 정기예금6개월미만  (ECOS 121Y002/BEABAA2111, 월별)
 """
 
+import argparse
 import warnings
 import numpy as np
 import pandas as pd
@@ -31,10 +32,23 @@ from pathlib import Path
 
 warnings.filterwarnings('ignore')
 
+# ── 날짜 인수 파싱 ──
+# 기본값: 오늘 날짜. 학술제 날짜로 고정하려면:
+#   python step3_collect_data.py --end 2026-06-15
+parser = argparse.ArgumentParser()
+parser.add_argument('--end', default=pd.Timestamp.today().strftime('%Y-%m-%d'),
+                    help='데이터 수집 종료일 (YYYY-MM-DD). 기본값: 오늘')
+args = parser.parse_args()
+
 DATA_DIR = Path(__file__).parent.parent / 'data'
 ECOS_KEY = '1J5840GM10SEKX5HM748'
 START_YF = '2000-01-01'
-END_YF   = '2025-04-30'
+END_YF   = args.end
+
+_end_ecos = pd.Timestamp(END_YF).strftime('%Y%m%d')   # ECOS용 YYYYMMDD
+_end_ecos_m = pd.Timestamp(END_YF).strftime('%Y%m')   # ECOS 월별용 YYYYMM
+
+print(f"▶ 데이터 수집 종료일: {END_YF}")
 
 SLOTS = [
     '국내주식_코스피', '국내주식_코스닥',
@@ -51,7 +65,9 @@ SLOTS = [
 # ════════════════════════════════════════════════
 # ECOS 유틸리티
 # ════════════════════════════════════════════════
-def ecos_fetch(stat_code, item_code, cycle='D', start='20000101', end='20250430'):
+def ecos_fetch(stat_code, item_code, cycle='D', start='20000101', end=None):
+    if end is None:
+        end = _end_ecos
     """ECOS StatisticSearch → pandas Series (index=date, value=float)."""
     if cycle == 'M':
         start = start[:6]
@@ -212,7 +228,7 @@ if 'cd' in raw_yields:
 print("\n▶ 4. MAR 시계열 (ECOS 121Y002/BEABAA2111)...")
 
 mar_series = ecos_fetch('121Y002', 'BEABAA2111', cycle='M',
-                         start='200001', end='202504')
+                         start='200001', end=_end_ecos_m)
 if mar_series is not None and len(mar_series) >= 12:
     print(f"  정기예금(6개월미만): {mar_series.index.min().date()} ~ "
           f"{mar_series.index.max().date()} ({len(mar_series)}개월)")
