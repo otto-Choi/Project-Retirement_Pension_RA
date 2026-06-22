@@ -2,6 +2,15 @@
 data/
 !data/README.md
 
+# Persona pipeline data (large files, reproducible from source)
+persona/data/
+
+# Large presentation source file (use docs/핑핑이테크.pdf for sharing)
+docs/발표자료_원본.pdf
+
+# Claude Code working file — not part of project
+CLAUDE.md
+
 # macOS
 .DS_Store
 

@@ -1,302 +1,143 @@
 # XAI 기반 퇴직연금 ETF 포트폴리오 최적화
 
-> **학술제 발표 프로젝트** | DArt-B | 2026  
-> **성격**: 데이터 기반 투자 **참고 정보** 시스템 (투자 일임·자문 아님)
+> **학술제 발표 → 앱 출시 준비** | DArt-B | 2026  
+> 모든 출력은 투자 자문이 아닌 **투자 참고 정보**입니다 (자본시장법 §6)
+
+한국 DC/IRP 가입자를 위해 개인 Risk Score 기반으로 ETF 포트폴리오 비중을 산출하고, XAI로 그 근거를 투명하게 제시하는 데이터 기반 참고 정보 시스템. Black-Litterman 내재수익률 + Sortino 비율 최대화 + 8단계 개인화 파이프라인으로 구성된다.
+
+학술제 발표 후 팀 전체가 이 시스템을 모바일 앱으로 출시해 상용화를 시도하고 있다. 서비스 개발 완료, 출시 준비 중. | [GitHub](https://github.com/otto-Choi/retirement-pension)
+
+이 프로젝트의 포트폴리오 파트 — 금융 이론 설계, 파라미터 결정, 구현 검증 전 영역을 주도했다.
+
+> **기여 상세 기록**: [docs/contributions.md](docs/contributions.md) — 설계 의사결정·구현 오류 발견·모델 개선 전 과정을 날짜·근거 기반으로 기록
+
+**핵심 산출물**: [`notebooks/portfolio_comprehensive.ipynb`](notebooks/portfolio_comprehensive.ipynb) — 이론·백테스트·CAL·λ_implied·XAI 전 단계를 재현 가능한 통합 분석 노트북
 
 ---
 
-## 한 줄 정의
+## 왜 이런 설계인가 — 핵심 판단 3가지
 
-한국 퇴직연금(DC/IRP) 가입자를 위해, 개인 Risk Score 기반으로 개인화된 ETF 포트폴리오 비중을 산출하고, XAI로 그 근거를 투명하게 제시하는 데이터 기반 참고 정보 시스템.
+**하방위험만 고려한 이유**
 
----
+퇴직연금 가입자의 핵심 비대칭성은 "손실 후 회복 시간이 없다"는 점이다. 은퇴가 가까울수록 큰 손실은 복구 불가능하고, 상방 변동성은 추가 효용이 작다. 상방·하방을 동등하게 위험으로 취급하는 표준편차 기반 지표가 이 맥락에서 부적절한 이유다. Estrada(2007) 하방공분산 Σ_down은 MAR 미달 수익률만 분산에 포함해, 퇴직연금에서 실제로 의미 있는 위험만 수치화한다.
 
-## 법적 고지
+**Sortino를 선택한 이유**
 
-이 시스템의 모든 출력은 「자본시장법」 제6조에 따라 **투자 추천이 아닌 투자 참고 정보**입니다.  
-의사결정권은 전적으로 투자자에게 있으며, XAI를 통해 분석 근거를 투명하게 공개합니다.
+하방위험을 측정 기준으로 정했다면, 최적화 목적함수도 일관돼야 한다. Sortino 비율은 "MAR을 초과한 수익" 대비 "MAR 미달의 하방위험" 비율이다 — 즉, 원리금보장형(정기예금) 수준을 기준선으로, 그것을 넘는 수익을 위험 대비 얼마나 효율적으로 얻는가를 측정한다. λ=3.0, MAR 시변 적용, Σ_down 위험 측도가 모두 이 방향에서 일관된다.
 
----
+**이 서비스가 충분한 경쟁력을 가진다고 판단한 이유**
 
-## 프로젝트 구조
-
-상세 파일 트리는 [STRUCTURE.md](STRUCTURE.md) 참조.
-
-주요 디렉토리:
-
-| 디렉토리 | 역할 |
-|---------|------|
-| `src/` | 실행 스크립트 (Step 3~8, portfolio_engine) |
-| `notebooks/` | 분석·검증 노트북 |
-| `data/` | 모든 입력 데이터 |
-| `results/` | 파이프라인 출력 결과 (step3~8, current) |
-| `docs/` | 프로젝트 문서 (01~13) |
-| `documents/` | 팀 공유 문서 |
+한국 DC/IRP 시장의 핵심 문제는 대부분의 가입자가 원리금보장형에 자금을 방치한다는 점이다. MAR(정기예금 금리)를 위험조정 수익 기준으로 두고 이를 꾸준히 초과하는 것만으로도 — 절대 수익 극대화가 아니라 — 이미 강력한 경쟁력이 된다. 백테스트 결과가 이를 뒷받침한다: 방치(CAGR 1.97%) 대비 Step5b CAGR 6.60%, 단순 동일비중(CAGR 5.76%)보다 높은 수익을 보수적 하방위험 틀 안에서 달성했다.
 
 ---
 
-## 핵심 설계 파라미터
+## 시스템 아키텍처
+
+```
+[입력] 사용자 정보 (은퇴까지 기간 · 나이 · 직업 · 자금여력 · 가족 · 라이프스타일)
+       + ETF 시계열 + ECOS 거시지표
+         │
+         ▼
+[Step 3]  기초자산 지수 수집 (pykrx · yfinance · ECOS)
+          → 최적 롤링 윈도우 5년 확정 (MAE·소르티노·일관성·이상치 4기준 종합)
+         │
+         ▼
+[Step 4]  BL 내재수익률  Π = λ · Σ_down · w_mkt  (λ=3.0, Estrada 하방공분산)
+[Step 5]  Sortino 비율 최대화 (SLSQP)
+          → 지역 제약 포트폴리오  US≤50% / KR≤50% / EM≤15%  + MVP 병행
+[Step 5b] 모멘텀 뷰 추가
+          → 음수 모멘텀 슬롯 제외 (B) + w_mkt 모멘텀 가중 (C)
+         │
+         ▼
+[Step 6]  CAL 구성  →  Risk Score(1~10) → w_risky 선형 보간 (0%~70%)
+[Step 6b] 현재 시점 포트폴리오 산출 (날짜 인수화, --as-of)
+[Step 7]  내재 위험회피계수 λ_implied 역산
+         │
+         ▼
+[Step 8a] XAI Layer A — 사용자 대면 시각화 (A0~A6)
+[Step 8b] XAI Layer B — 분석용 (BL 예측력 · 집중도 · 제약 바인딩 · 성과 기여)
+```
+
+**핵심 파라미터:**
 
 | 파라미터 | 값 | 근거 |
 |---------|-----|------|
 | 위험 측도 | 하방공분산 Σ_down (Estrada 2007) | 정규분포 가정 없이 하방위험만 포착 |
 | 기대수익률 | BL 내재수익률 Π = λ·Σ_down·w_mkt | 시장 포트폴리오 역산, 추정 오류 최소화 |
 | λ | 3.0 | He & Litterman(1999) 2.5 + 퇴직연금 보수성 반영 |
-| MAR | ECOS 정기예금 수신금리 (시변) | 무위험 기준, 분기 시변 |
+| MAR | ECOS 정기예금 수신금리 (시변) | 고정값 아닌 분기 시변 무위험 기준선 |
 | 최적화 목적 | Sortino 비율 최대화 (SLSQP) | 하방위험 중심, 퇴직연금 특성 일관성 |
-| 윈도우 | 5년 (1,260거래일) | Step 3 4기준 종합 선정 |
-| 리밸런싱 | 분기 (63거래일) | 백테스트 기준 |
-| 개별 자산 상한 | 40% | 단일 자산 과집중 방지 |
-| 지역 제약 | US≤50%, KR≤50%, EM≤15% | Step 5 확정 |
+| 롤링 윈도우 | 5년 (1,260거래일) | 4기준 종합 평가로 선정 |
+| 리밸런싱 | 분기 (63거래일) | 실전 DC/IRP 리밸런싱 주기 기준 |
+| 지역 제약 | US≤50%, KR≤50%, EM≤15% | 시장 비중 기반 + 테일 리스크 보완 |
 | 위험자산 상한 | 70% | DC/IRP 법적 상한 |
 
 ---
 
-## 13개 슬롯 구조
+## 주요 결과 (2016~2025, 38분기 OOS)
 
-```
-국내주식_코스피 / 국내주식_코스닥
-미국주식_SP500 / 미국주식_나스닥
-신흥국_인도 / 신흥국_중국
-국내채권_국고채단중기 / 국내채권_국고채장기 / 국내채권_회사채 / 국내채권_종합
-해외채권_미국국채
-원자재_금
-무위험(현금성)
-```
+| 전략 | 누적수익률 | CAGR | MDD | 소르티노 |
+|------|-----------|------|-----|---------|
+| **Step5b — 모멘텀 B+C** | **83.4%** | **6.60%** | **-23.7%** | **0.659** |
+| Step5 — 지역제약 (base) | 84.0% | 6.60% | -24.4% | 0.599 |
+| 동일비중 (1/N, 분기 리밸) | 70.3% | 5.76% | -11.9% | — |
+| 코스피 100% | 37.2% | 3.39% | -29.7% | — |
+| 시장비중 (AUM 추종) | 36.5% | 3.33% | -22.0% | — |
+| **무위험 100% (방치)** | **20.3%** | **1.97%** | **0.00%** | — |
 
----
+원리금보장형 방치(CAGR 1.97%) 대비 CAGR **+4.63%p** 개선. 모멘텀 뷰 추가(Step5b)로 소르티노 비율 +10%(0.599 → 0.659), MAR 초과 분기 +2.7%p, KR 집중도 50.7% → 42.1% 개선.
 
-## 백테스트 주요 결과 (2016~2025)
-
-| 전략 | 누적수익률 | MDD | 평균 소르티노 |
-|------|-----------|-----|-------------|
-| Sortino-max (비제약, Step 4) | +120.6% | -34.8% | — |
-| Sortino-max (지역제약, Step 5) | +94.9% | -24.4% | — |
-| MVP (지역제약, Step 5) | — | — | — |
-
-> Step 5 비교표: `notebooks/step5_results/comparison.csv`
+> 상세 비교: `results/step5b/comparison.csv` | XAI 분석: [`notebooks/step8b_analysis_xai.ipynb`](notebooks/step8b_analysis_xai.ipynb)
 
 ---
 
-## 개인화 파이프라인 (Risk Score → w_risky)
+## 구현 검증 — 발견된 설계 위반 5건
 
-```
-Risk Score (1~10점) =
-  0.20 × 은퇴기간 점수  +  0.15 × 나이 점수
-+ 0.15 × 직업 점수     +  0.20 × 자금여력 점수
-+ 0.15 × 가족 점수     +  0.15 × 라이프스타일 점수
-
-라이프스타일: 엔비디아 페르소나 텍스트 → ko-sroberta embedding
-             → KMeans(500군집) → GPT 점수화 → Big Five z-score
-             → 0.45×openness_z - 0.45×stability_z + 0.10×conscientiousness_z
-             → qcut → 1~5등급
-
-위험군 → w_risky:
-  1~2점: 초보수형 → 0%   (전액 무위험)
-  3~4점: 보수형   → 20%
-  5~6점: 중립형   → 40%
-  7~8점: 성장형   → 60%
-  9~10점: 공격형  → 70%  (DC/IRP 법적 상한)
-
-최종 배분 = w_risky × Sortino-max 포트폴리오
-           + (1 - w_risky) × 무위험자산
-```
-
----
-
-## 스크립트 실행 순서
-
-```bash
-# 1. 기초자산 지수 데이터 수집 (pykrx, yfinance, ECOS)
-python src/step3_collect_data.py
-
-# 2. 최적 윈도우 탐색 (→ notebooks/step3_results/)
-python src/step3_window_analysis.py
-
-# 3. 비제약 Sortino-max 포트폴리오 (→ notebooks/step4_results/)
-python src/step4_portfolio.py
-
-# 4. 지역제약 포트폴리오 + MVP (→ notebooks/step5_results/)
-python src/step5_constrained.py
-
-# 5. 개별 사용자 조회 (portfolio_engine.py 직접 import)
-from src.portfolio_engine import get_portfolio_for_user
-result = get_portfolio_for_user(
-    risk_score=6.5,
-    query_date='2025-03-31',
-    current_balance=50_000_000
-)
-```
-
----
-
-## 진행 현황 (2026-05-15 기준)
-
-| 단계 | 상태 | 산출물 |
-|------|------|--------|
-| Step 1~2: ETF 데이터 수집·정제 | ✅ 완료 | `notebooks/inputs/` |
-| Step 3: 윈도우 탐색 (5yr 확정) | ✅ 완료 | `step3_results/window_analysis_result.csv` |
-| Step 4: BL + Sortino-max | ✅ 완료 (λ=3.0 재실행) | `step4_results/` |
-| Step 5: 지역제약 포트폴리오 | ✅ 완료 (EM≤15% 재실행) | `step5_results/` |
-| portfolio_engine.py | ✅ 완료 | XAI Layer A(a0~a6) + B(b1~b4) |
-| Risk Score 설계 | ✅ 문서 완성 | `docs/05_persona_risk_scoring.md` |
-| 텍스트 파이프라인 기획 | ✅ 문서 완성 | `docs/05_persona_risk_scoring.md` §6 |
-| Step 6~7 (CAL, 내재 λ) | ⚠️ 설계 완료, 코드 미구현 | engine 내 로직 포함 |
-| CVaR / 스트레스 테스트 | ❌ 미구현 | `docs/10_todo.md` |
-| Streamlit 데모 | ❌ 미구현 | `docs/10_todo.md` |
-
----
-
-## 다음 우선 작업
-
-1. `CVaR 모듈`: `get_cvar(w_risky, query_date)` — historical simulation 95%/99%
-2. `CAL 동적 테이블`: `get_cal_curve(query_date)` — w_risky 0~70% 연속 산출
-3. `스트레스 테스트`: 2020 COVID / 2022 금리충격 구간 성과
-4. `텍스트 파이프라인 실행`: Embedding → KMeans → GPT 점수화 → z-score
-5. `Streamlit 데모`: 4개 화면 프로토타입
-
----
-
-## 문서 목록 (docs/)
-
-| 파일 | 내용 |
-|------|------|
-| [01_project_overview.md](docs/01_project_overview.md) | 전체 개요, 파이프라인, 진행 현황, 발표 흐름 |
-| [02_pipeline_design.md](docs/02_pipeline_design.md) | 포트폴리오 파트 설계 계획 |
-| [03_xai_design.md](docs/03_xai_design.md) | XAI 레이어 A·B 전체 설계 (Step 8) |
-| [04_progress_steps1_5.md](docs/04_progress_steps1_5.md) | Step 1~5 진행 기록 및 확정 파라미터 |
-| [05_persona_risk_scoring.md](docs/05_persona_risk_scoring.md) | Risk Score 설계, 텍스트 처리 파이프라인, 리밸런싱 서비스 |
-| [06_dataset_reference.md](docs/06_dataset_reference.md) | 데이터셋 명세서 |
-| [07_meeting_notes.md](docs/07_meeting_notes.md) | 회의록 요약 (2026-05-05) |
-| [08_feedback_log.md](docs/08_feedback_log.md) | Q&A 준비, 이론 근거, 발표 체크리스트 |
-| [09_data_collection_plan.md](docs/09_data_collection_plan.md) | ETF 수집 절차 + 거시지표 수집 설계·현황 |
-| [10_todo.md](docs/10_todo.md) | 남은 작업 목록 |
-| [11_authored_feedback.md](docs/11_authored_feedback.md) | **직접 작성** — Step 1~5 피드백 원본 (구현 오류 발견·수정 지시·설계 결정 근거) |
-| [project_proposal.pdf](docs/project_proposal.pdf) | 초기 기획서 |
-| [etf_data_spec.pdf](docs/etf_data_spec.pdf) | ETF 데이터 명세서 |
-| [legacy/document/](docs/legacy/document/) | 원본 document/ 보존 (001~010 원문) |
-| [legacy/temp/](docs/legacy/temp/) | 원본 temp/ 보존 (Step 3~5 구버전 스크립트·페르소나 파일) |
-
----
-
-## 기여자 — 최철원 (포트폴리오 파트 리드)
-
-> 금융 도메인 전문 역할. 이론 설계·파라미터 결정·구현 검증·발표 대비 전 영역 주도.  
-> 이 섹션은 회의록(07), 피드백 로그(08, 11) 원문을 기반으로 작성.
-
----
-
-### 1. 전체 파이프라인 아키텍처 설계 (2026-05-05 회의)
-
-팀 회의에서 전체 6단계 파이프라인을 직접 제안하고 확정:
-
-```
-1. 페르소나 데이터 → 변수 추출 → Risk Score (위험 허용 수준)
-2. ETF 데이터 수집·필터링 → 13개 슬롯 대표 ETF 선정
-3. 시점별 최적 포트폴리오 산출 (BL + Sortino-max)
-4. Risk Score → w_risky → 위험/안전자산 비중 결정
-5. 최종 포트폴리오 출력 + XAI 설명
-6. (추가) ETF 상품 직접 매칭
-```
-
-- MPT, 샤프 지수, CML/SML 등 이론 방향 제시 및 설계 주도
-- ETF 선별 기준, 리밸런싱 주기 등 핵심 의사결정 주도
-- ETF 데이터 1,100여 개 직접 수집 완료
-- 페르소나 텍스트 데이터는 보조 역할(고정값)로 최소화할 것을 강하게 주장 → 팀 합의 도출
-- 회의 녹음·텍스트 추출·회의록 정리까지 담당
-
----
-
-### 2. 구현 오류 발견 및 수정 지시 (2026-05, 문서 009)
-
-초기 구현된 코드를 직접 검토하여 5개 설계 의도 위반을 발견하고 수정 지시:
+초기 구현 코드를 직접 검토해 설계 의도와 다른 구현 5건을 발견하고 수정 지시했다. 수정 후 Step 3~5 전체 재실행.
 
 | 발견한 문제 | 의도한 설계 | 영향 |
 |------------|-----------|------|
-| ETF 선정 기준: AUM 최대 단순 선정 | 총보수(50%)·거래대금(30%)·AUM(20%) 가중평균 순위 | 총보수 낮은 ETF 탈락 가능 |
-| 롤링 윈도우 탐색: ETF 수익률 사용 | 기초자산 지수 사용 (ETF 상장 이전까지 소급) | 분석 기간이 2023년 이후밖에 안 됨 |
-| 최적 윈도우 기준: Sortino 최대 단일 기준 | MAE·소르티노·일관성·이상치 4기준 종합 | 단일 지표로 선택 시 왜곡 |
-| MAR: 연 2.5% 고정 | ECOS 정기예금 금리 시변 적용 | 하방공분산·소르티노 전체가 실전과 달라짐 |
-| 리밸런싱 주기: 월별(21일) | 분기(63거래일) — 실전 주기와 일치 | 검증 기준 자체가 무효 |
+| ETF 선정: AUM 최대 단순 선정 | 총보수(50%)·거래대금(30%)·AUM(20%) 가중 순위 | 총보수 낮은 ETF 탈락 가능 |
+| 롤링 윈도우: ETF 수익률 사용 | 기초자산 지수 사용 (ETF 상장 이전까지 소급) | 분석 기간이 2023년 이후로 단축됨 |
+| 윈도우 평가: 소르티노 단일 기준 | MAE·소르티노·일관성·이상치 4기준 종합 | 단일 지표 선택 시 왜곡 |
+| MAR: 연 2.5% 고정값 | ECOS 정기예금 금리 시변 적용 | 하방공분산·소르티노 전체가 실전과 달라짐 |
+| 리밸런싱: 월별(21일) | 분기(63거래일) — 실전 주기와 일치 | 검증 기준 자체가 무효 |
 
-→ 수정 우선순위 정리 후 팀에 공유. 수정 후 Step 3~5 전체 재실행.
-
----
-
-### 3. 핵심 파라미터 결정 및 이론 근거 수립 (2026-05-13, 문서 010)
-
-#### λ = 3.0 결정
-
-He & Litterman(1999)의 표준값 2.5를 퇴직연금 맥락에서 상향 조정. 결정 근거를 직접 정리:
-
-- He & Litterman(1999): 시장 중립값 2.5 (Sharpe ≈ 0.5 가정)
-- Merton(1969): 장기 투자자 위험회피계수 범위 2~4, 은퇴 준비 투자자는 상단(3~4)
-- Blitz & van Vliet(2007): 퇴직연금 운용자 실효 λ 평균 2.8~3.2 실증
-- Sortino 목적함수와 방향성 일관성: 하방위험 페널티 강화 → λ 상향 정합
-
-#### EM(신흥국) ≤ 15% 제약 추가
-
-US ≤ 50% 적용 이후 중국 ETF가 1.8% → 16.5%로 급증하는 문제를 직접 발견. 추가 제약 필요성과 근거를 정리:
-
-- MSCI ACWI 내 신흥국 비중 ~12% (2024)
-- 국민연금 해외 신흥국 목표 비중 5~10%
-- 중국 고유 리스크: 자본통제·회계 투명성·2021 테크 규제 등 공분산이 포착 못하는 테일 리스크
-- US·KR 상한 존재 + EM 무상한은 제약 비대칭 → EM 상한 추가로 일관성 확보
-
-#### MVP 구현 결정
-
-Sortino-max 단독 구현에서 MVP를 병행 구현해야 하는 이유를 정리:
-
-- CAL 구성 시 리스크자산 포트폴리오의 하한 경계점
-- "왜 MVP 대신 Sortino-max인가"에 대한 정량 근거
-- XAI에서 Shapley value로 두 포트폴리오 비중 차이를 설명 → 학술적 타당성
-- Step 7 CVaR와 3방향 비교 가능
+원본 피드백: [`docs/design_decisions/11_authored_feedback.md`](docs/design_decisions/11_authored_feedback.md)
 
 ---
 
-### 4. 발표 대비 종합 피드백 보고서 작성 (문서 002/008)
+## 주요 산출물
 
-학술제 발표 전 전 영역에 걸친 종합 피드백 보고서를 직접 작성:
-
-- **발표 주제 적절성** — 핵심 통계(83.3%, 58조원) 출처 명시 지시, 경쟁사 XAI 미도입의 구조적 이유 분석
-- **방법론 공백 해소** — SHAP 메타 모델 X/Y 변수 명세, ETF 50종 선정 기준, 백테스팅 구간 선택 근거
-- **재무이론 방어 논리** — 다중공선성 VIF 기반 처리 프로세스, 조정베타 Blume(1971) 인용, 꼬리 위험 CVaR 보완 방향
-- **심사위원 Q&A 5개** 예상 질문 + 답변 전략 수립
-- **팀원 필수 학습 자료** — Markowitz, Sharpe, Merton, Lundberg·Lee(SHAP), Kahneman·Tversky 등 17개 논문 정리
-- **최종 체크리스트** — 🔴 즉시·🟡 권고·🟢 완성도 3단계 우선순위 구분
-
----
-
-### 5. 거시지표 수집 설계 (문서 005)
-
-ECOS에서 수집할 거시지표를 직접 선정하고 분류 체계를 수립:
-
-- 수집 완료 지표 20개 확인 (금리 4·물가 3·유동성 2·대외 1·실물경기 8·심리 2)
-- 최우선 추가 5개 (실질GDP 분기, 대출금리, 수출YoY, BSI, CCSI) 이유와 함께 정리
-- 다중공선성 처리 전략: 스프레드 변환 → VIF 필터 → PCA 압축 → 정상성 확보 4단계
-- 4분면 레짐 분류 모델(골디락스·과열·침체·스태그플레이션) 설계
+| 산출물 | 경로 | 내용 |
+|--------|------|------|
+| **통합 분석 노트북** | [`notebooks/portfolio_comprehensive.ipynb`](notebooks/portfolio_comprehensive.ipynb) | 이론·백테스트·CAL·λ_implied·XAI 전 단계 재현 |
+| **학술제 발표 자료** | [`docs/핑핑이테크.pdf`](docs/핑핑이테크.pdf) | 학술제 발표 슬라이드 전체 |
+| **서비스 포트폴리오** | [`docs/퇴직연금 추천 서비스.pdf`](docs/퇴직연금 추천 서비스.pdf) | 서비스 기획·설계 상세 문서 (별도 포트폴리오용) |
+| 현재 시점 포트폴리오 | `results/current/current_cal_allocations.csv` | RS 1.0~10.0 × 13슬롯 비중 + 위험지표 4종 |
+| XAI 시각화 (A0~A6) | `results/step8/figures/` | 사용자 대면 설명 이미지 7종 |
+| Step5b 성과 비교 | `results/step5b/comparison.csv` | 모멘텀 뷰 전후 + 베이스라인 4종 비교 |
+| λ_implied 시계열 | `results/step7/lambda_implied.csv` | 내재 위험회피계수 분기별 추이 |
 
 ---
 
-### 기여 요약
+## 파일 구조
 
-| 영역 | 기여 내용 |
-|------|----------|
-| 아키텍처 | 6단계 전체 파이프라인 설계 및 팀 합의 주도 |
-| 데이터 | ETF 1,100개 수집, 13개 슬롯 분류 체계 설계 |
-| 이론 | BL+Sortino+하방공분산 이론 체계 수립, λ=3.0 근거 정리 |
-| 검증 | 5개 구현 오류 발견·수정 지시, 4기준 윈도우 평가 설계 |
-| 제약 설계 | EM 제약 추가 필요성 발견·근거 수립, MVP 병행 구현 결정 |
-| 발표 대비 | 종합 피드백 보고서(17개 논문), Q&A 전략, 체크리스트 |
-| 거시지표 | ECOS 수집 설계, 레짐 분류 모델 설계 |
+| 디렉토리 | 역할 |
+|---------|------|
+| `src/` | 실행 스크립트 (Step 3~8, portfolio_engine) |
+| `notebooks/` | 분석·검증 노트북 (portfolio_comprehensive.ipynb 중심) |
+| `data/` | 입력 데이터 (ETF 가격·거시지표·슬롯 수익률) |
+| `results/` | 파이프라인 출력 (step3~current, XAI 시각화) |
+| `docs/architecture/` | 시스템·XAI·파이프라인 설계 문서 |
+| `docs/design_decisions/` | 파라미터 결정 근거·구현 피드백 원본 |
+| `docs/validation/` | 모델 검증·발표 방어 논리 |
+| `docs/research/` | 데이터셋 명세·거시지표 수집 계획 |
+| `docs/archive/` | 회의록·진행 기록·발표 준비 문서 |
+
+상세 파일 트리: [STRUCTURE.md](STRUCTURE.md)
 
 ---
 
-## 이론 근거
-
-- Estrada (2007): 하방공분산 행렬 정의
-- Modigliani (1954): 생애주기 가설 (나이별 Risk Score)
-- Bodie, Merton & Samuelson (1992): 투자 기간과 위험 수용 능력
-- He & Litterman (1999): Black-Litterman λ 표준값
-- OECD (2021): 퇴직연금 가이드라인 (TDF 단계)
-- Chen, Roll & Ross (1986): APT 기반 거시 팩터 이론
+*Estrada(2007) · He & Litterman(1999) · Merton(1969) · Bodie, Merton & Samuelson(1992) · OECD(2021)*  
+*모든 출력은 「자본시장과 금융투자업에 관한 법률」 제6조에 따라 투자 추천이 아닌 투자 참고 정보입니다.*
